@@ -234,6 +234,8 @@ def upload_file(
         "filesize": filesize,
         "filetype": filetype,
         "file_path": sts.get("file_path"),
+        "file_url": sts.get("file_url"),
+        "content_type": content_type,
         "parse": parsed,
     }
     if project_id:

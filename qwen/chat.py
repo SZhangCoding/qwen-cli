@@ -31,6 +31,7 @@ _JS_SEND = r"""
     const thinking = %s;
     const search = %s;
     const parentId = %s;
+    const fileRefs = %s;
     const msgId = crypto.randomUUID();
     const body = {
         stream: true,
@@ -47,7 +48,7 @@ _JS_SEND = r"""
             role: "user",
             content: userContent,
             user_action: "chat",
-            files: [],
+            files: fileRefs,
             timestamp: Math.floor(Date.now()/1000),
             models: [model],
             chat_type: "t2t",
@@ -126,6 +127,44 @@ def new_chat(bridge: Bridge, model: str = "qwen3.6-plus", project_id: str | None
     return data["data"]["id"]
 
 
+def _build_file_ref(upload: dict, user_id: str) -> dict:
+    """Turn an upload_file() result into the shape required by messages[].files[]."""
+    now_ms = int(__import__("time").time() * 1000)
+    name = upload["filename"]
+    size = upload["filesize"]
+    ctype = upload.get("content_type") or "application/octet-stream"
+    fid = upload["file_id"]
+    return {
+        "type": "file",
+        "file": {
+            "created_at": now_ms,
+            "data": {},
+            "filename": name,
+            "hash": None,
+            "id": fid,
+            "user_id": user_id,
+            "meta": {
+                "name": name,
+                "size": size,
+                "content_type": ctype,
+                "parse_meta": {"parse_status": "success"},
+            },
+            "update_at": now_ms,
+        },
+        "id": fid,
+        "url": upload.get("file_url") or "",
+        "name": name,
+        "collection_name": "",
+        "progress": 0,
+        "status": "uploaded",
+        "size": size,
+        "error": "",
+        "file_type": ctype,
+        "showType": "file",
+        "file_class": "document",
+    }
+
+
 def send_message(
     bridge: Bridge,
     content: str,
@@ -135,12 +174,31 @@ def send_message(
     search: bool = False,
     parent_id: str | None = None,
     project_id: str | None = None,
+    files: list[str] | None = None,
     timeout: float = 300.0,
 ) -> dict:
-    """Send a message; create new chat if chat_id omitted. Returns full assistant response."""
+    """Send a message; create new chat if chat_id omitted. Returns full assistant response.
+
+    `files` is a list of local paths to upload and attach to the message.
+    """
+    from .files import upload_file
+    from .auth import check_login
+
     _ensure_origin(bridge)
     if not chat_id:
         chat_id = new_chat(bridge, model=model, project_id=project_id)
+
+    file_refs: list[dict] = []
+    uploads: list[dict] = []
+    if files:
+        user_id = (check_login(bridge).get("userInfo") or {}).get("id")
+        if not user_id:
+            raise RuntimeError("无法获取 user_id（检查登录状态）")
+        for path in files:
+            up = upload_file(bridge, path)
+            uploads.append(up)
+            file_refs.append(_build_file_ref(up, user_id))
+
     js = _JS_SEND % (
         json.dumps(chat_id),
         json.dumps(model),
@@ -148,9 +206,12 @@ def send_message(
         "true" if thinking else "false",
         "true" if search else "false",
         json.dumps(parent_id),
+        json.dumps(file_refs, ensure_ascii=False),
     )
     raw = bridge.evaluate(js, timeout=timeout)
     result = json.loads(raw) if isinstance(raw, str) else raw
     if result.get("error"):
         raise RuntimeError(f"chat failed: {result}")
+    if uploads:
+        result["uploadedFiles"] = [{"file_id": u["file_id"], "filename": u["filename"]} for u in uploads]
     return result
