@@ -32,6 +32,8 @@ python3 cli.py chat --content "用一句话解释什么是熵"
 | `delete-project --project-id ID` | 删除项目 |
 | `list-project-chats --project-id ID` | 列出项目内对话 |
 | `list-project-files --project-id ID` | 列出项目文件 |
+| `upload-file --file PATH [--project-id ID]` | 上传文件（走 OSS v4 签名，直接 Python → OSS，绕过浏览器） |
+| `delete-project-file --project-id ID --file-id ID` | 从项目移除文件 |
 
 所有命令返回 `{"ok": true, "data": ...}` 或 `{"ok": false, "error": {...}}`。
 

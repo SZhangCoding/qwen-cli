@@ -122,6 +122,23 @@ def cmd_list_project_files(args):
     _out({"data": list_project_files(_bridge(args), args.project_id)})
 
 
+def cmd_upload_file(args):
+    from qwen.files import upload_file
+    _out({"data": upload_file(
+        _bridge(args),
+        file_path=args.file,
+        project_id=args.project_id,
+        filetype=args.filetype,
+        content_type=args.content_type,
+        wait=not args.no_wait,
+    )})
+
+
+def cmd_delete_project_file(args):
+    from qwen.files import delete_project_file
+    _out({"data": delete_project_file(_bridge(args), args.project_id, args.file_id)})
+
+
 # ─── parser ──────────────────────────────────────────────────────────────────
 
 def build_parser() -> argparse.ArgumentParser:
@@ -183,6 +200,19 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("list-project-files", help="列出项目已上传文件")
     sp.add_argument("--project-id", required=True)
     sp.set_defaults(func=cmd_list_project_files)
+
+    sp = sub.add_parser("upload-file", help="上传文件（可选挂到 project 下作为知识库）")
+    sp.add_argument("--file", required=True, help="本地文件绝对路径")
+    sp.add_argument("--project-id", help="上传后挂到指定 project 下")
+    sp.add_argument("--filetype", help="文件扩展名（省略则从文件名自动推断）")
+    sp.add_argument("--content-type", default="auto", help="OSS PUT Content-Type；auto=按扩展名推断")
+    sp.add_argument("--no-wait", action="store_true", help="不等待 parse 完成立即返回")
+    sp.set_defaults(func=cmd_upload_file)
+
+    sp = sub.add_parser("delete-project-file", help="从 project 中移除文件")
+    sp.add_argument("--project-id", required=True)
+    sp.add_argument("--file-id", required=True)
+    sp.set_defaults(func=cmd_delete_project_file)
 
     sp = sub.add_parser("chat", help="发送消息（新对话或追加到已有对话）")
     sp.add_argument("--content", help="消息内容")
