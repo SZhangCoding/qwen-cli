@@ -165,6 +165,21 @@ def _build_file_ref(upload: dict, user_id: str) -> dict:
     }
 
 
+def _smart_default_timeout(thinking: bool, n_files: int) -> float:
+    """根据 thinking + 附件数估算合理的 bridge.evaluate 超时.
+
+    经验值：
+    - 基础 300s 够大多数无 thinking、无附件场景
+    - 每个附件读+解析约 +30s（OSS 上传 + 后端 parse）
+    - thinking 模式额外 +600s（reasoning tokens 大幅拉长 SSE）
+    上限 1800s，避免无限阻塞。
+    """
+    t = 300.0 + 30.0 * n_files
+    if thinking:
+        t += 600.0
+    return min(t, 1800.0)
+
+
 def send_message(
     bridge: Bridge,
     content: str,
@@ -175,11 +190,12 @@ def send_message(
     parent_id: str | None = None,
     project_id: str | None = None,
     files: list[str] | None = None,
-    timeout: float = 300.0,
+    timeout: float | None = None,
 ) -> dict:
     """Send a message; create new chat if chat_id omitted. Returns full assistant response.
 
     `files` is a list of local paths to upload and attach to the message.
+    `timeout` 为 None 时根据 thinking + 文件数自动估算（参 _smart_default_timeout）。
     """
     from .files import upload_file
     from .auth import check_login
@@ -198,6 +214,9 @@ def send_message(
             up = upload_file(bridge, path)
             uploads.append(up)
             file_refs.append(_build_file_ref(up, user_id))
+
+    if timeout is None:
+        timeout = _smart_default_timeout(thinking, len(file_refs))
 
     js = _JS_SEND % (
         json.dumps(chat_id),

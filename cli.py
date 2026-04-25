@@ -63,6 +63,7 @@ def cmd_chat(args):
         parent_id=args.parent_id,
         project_id=args.project_id,
         files=args.file or None,
+        timeout=args.timeout,
     )
     _out({"data": result})
 
@@ -225,6 +226,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--search", action="store_true", help="开启联网搜索")
     sp.add_argument("--project-id", help="新对话挂到指定 project 下（仅新建时生效）")
     sp.add_argument("--file", action="append", help="作为附件上传的本地文件（可多次指定）")
+    sp.add_argument("--timeout", type=float, default=None,
+                    help="bridge.evaluate 超时秒数；省略则按 thinking+文件数自动估算（基础 300s，每文件 +30s，thinking +600s，上限 1800s）")
     sp.set_defaults(func=cmd_chat)
 
     return p
