@@ -18,8 +18,10 @@ class Bridge:
         self.base = f"http://{host}:{port}"
         self.session = session
 
-    def _call(self, payload: dict, timeout: float = 30) -> Any:
-        payload.setdefault("session", self.session)
+    def _call(self, action: str, args: dict | None = None, timeout: float = 30) -> Any:
+        payload = {"action": action, "session": self.session}
+        if args is not None:
+            payload["args"] = args
         data = json.dumps(payload).encode()
         req = urllib.request.Request(
             f"{self.base}/command",
@@ -38,11 +40,24 @@ class Bridge:
             raise BridgeError(err.get("message", str(result)))
         return result.get("data")
 
-    def navigate(self, url: str) -> None:
-        self._call({"action": "navigate", "args": {"url": url}})
+    def find_tab(self, url: str) -> str | None:
+        """Return tabId if a tab matching the URL domain is already open, else None."""
+        try:
+            data = self._call("find_tab", {"url": url})
+            return data.get("tabId") if isinstance(data, dict) else None
+        except BridgeError:
+            return None
+
+    def navigate(self, url: str, new_tab: bool = False) -> None:
+        self._call("navigate", {"url": url, "newTab": new_tab})
+
+    def navigate_or_reuse(self, url: str) -> None:
+        """Reuse existing tab if one for this URL is already open; otherwise open new tab."""
+        if self.find_tab(url) is None:
+            self.navigate(url, new_tab=True)
 
     def evaluate(self, code: str, timeout: float = 30) -> Any:
-        data = self._call({"action": "evaluate", "args": {"code": code}}, timeout=timeout)
+        data = self._call("evaluate", {"code": code}, timeout=timeout)
         return data.get("value") if isinstance(data, dict) else data
 
     def wait_for_initial_state(self, timeout: float = 10.0) -> bool:

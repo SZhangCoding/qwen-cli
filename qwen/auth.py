@@ -26,7 +26,7 @@ _JS = """
 def _ensure_origin(bridge: Bridge) -> None:
     url = bridge.evaluate("location.href") or ""
     if "chat.qwen.ai" not in url:
-        bridge.navigate("https://chat.qwen.ai/")
+        bridge.navigate_or_reuse("https://chat.qwen.ai/")
 
 
 def check_login(bridge: Bridge) -> dict:
