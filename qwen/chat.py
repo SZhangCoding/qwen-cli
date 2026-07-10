@@ -117,7 +117,7 @@ _JS_SEND = r"""
 """
 
 
-def new_chat(bridge: Bridge, model: str = "qwen3.6-plus", project_id: str | None = None) -> str:
+def new_chat(bridge: Bridge, model: str = "qwen3.7-max", project_id: str | None = None) -> str:
     """Create a new chat, return chat ID. Optionally attach to a project."""
     _ensure_origin(bridge)
     raw = bridge.evaluate(_JS_NEW_CHAT % (json.dumps(model), json.dumps(project_id)))
@@ -184,7 +184,7 @@ def send_message(
     bridge: Bridge,
     content: str,
     chat_id: str | None = None,
-    model: str = "qwen3.6-plus",
+    model: str = "qwen3.7-max",
     thinking: bool = False,
     search: bool = False,
     parent_id: str | None = None,

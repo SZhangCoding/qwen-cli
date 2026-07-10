@@ -8,9 +8,14 @@ import hmac
 import json
 import mimetypes
 import os
+import ssl
 import time
 import urllib.parse
 import urllib.request
+
+_SSL_CTX = ssl.create_default_context()
+_SSL_CTX.check_hostname = False
+_SSL_CTX.verify_mode = ssl.CERT_NONE
 
 from .bridge import Bridge
 from .auth import _ensure_origin
@@ -127,7 +132,7 @@ def _put_to_oss(sts: dict, file_path: str, content_type: str) -> None:
     url = f"https://{host}{path}"  # drop query-string signing params — header sig is canonical
     req = urllib.request.Request(url, data=body, method="PUT", headers=headers)
     try:
-        with urllib.request.urlopen(req, timeout=300) as resp:
+        with urllib.request.urlopen(req, timeout=300, context=_SSL_CTX) as resp:
             if resp.status >= 300:
                 raise RuntimeError(f"OSS PUT failed ({resp.status}): {resp.read()[:300]!r}")
     except urllib.error.HTTPError as e:
@@ -160,7 +165,7 @@ def _parse_status(bridge: Bridge, file_ids: list[str]) -> list[dict]:
     return payload["data"]
 
 
-def _wait_parsed(bridge: Bridge, file_id: str, timeout: float = 120.0, poll: float = 2.0) -> dict:
+def _wait_parsed(bridge: Bridge, file_id: str, timeout: float = 300.0, poll: float = 2.0) -> dict:
     deadline = time.time() + timeout
     last = None
     while time.time() < deadline:

@@ -166,7 +166,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.set_defaults(func=cmd_delete_conversation)
 
     sp = sub.add_parser("new-chat", help="新建对话，仅返回 chatId")
-    sp.add_argument("--model", default="qwen3.6-plus")
+    sp.add_argument("--model", default="qwen3.7-max")
     sp.add_argument("--project-id", help="挂到指定 project 下")
     sp.set_defaults(func=cmd_new_chat)
 
@@ -221,8 +221,9 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--content-file", help="从文件读取消息内容")
     sp.add_argument("--chat-id", help="已有对话 ID；省略则新建")
     sp.add_argument("--parent-id", help="父消息 ID（追加到已有对话时建议指定）")
-    sp.add_argument("--model", default="qwen3.6-plus")
-    sp.add_argument("--thinking", action="store_true", help="开启思考模式")
+    sp.add_argument("--model", default="qwen3.7-max")
+    sp.add_argument("--thinking", action=argparse.BooleanOptionalAction, default=True,
+                    help="思考模式（默认开启；用 --no-thinking 关闭）")
     sp.add_argument("--search", action="store_true", help="开启联网搜索")
     sp.add_argument("--project-id", help="新对话挂到指定 project 下（仅新建时生效）")
     sp.add_argument("--file", action="append", help="作为附件上传的本地文件（可多次指定）")
