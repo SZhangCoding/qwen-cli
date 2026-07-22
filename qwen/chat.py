@@ -6,6 +6,13 @@ import json
 
 from .bridge import Bridge
 from .auth import _ensure_origin
+from .antibot import (
+    CaptchaRequired,
+    assert_no_captcha,
+    looks_like_punish,
+    reclassify_timeout,
+)
+from .bridge import BridgeTimeout
 
 _JS_NEW_CHAT = """
 (async () => {
@@ -17,8 +24,13 @@ _JS_NEW_CHAT = """
         headers: {"Content-Type": "application/json"},
         body: JSON.stringify(body)
     });
-    const j = await r.json();
-    return JSON.stringify(j);
+    const text = await r.text();
+    try {
+        return JSON.stringify(JSON.parse(text));
+    } catch (e) {
+        // 被 WAF 拦下时这里是 punish HTML，交给 Python 侧分类
+        return JSON.stringify({success: false, status: r.status, body: text.slice(0, 2000)});
+    }
 })()
 """
 
@@ -72,7 +84,12 @@ _JS_SEND = r"""
         headers: {"Content-Type": "application/json"},
         body: JSON.stringify(body)
     });
-    if (!r.ok) return JSON.stringify({error: "http_" + r.status, body: await r.text().catch(()=>null)});
+    if (!r.ok) return JSON.stringify({
+        error: "http_" + r.status,
+        status: r.status,
+        contentType: r.headers.get("content-type"),
+        body: await r.text().catch(()=>null)
+    });
     const reader = r.body.getReader();
     const decoder = new TextDecoder();
     let buf = "";
@@ -80,6 +97,7 @@ _JS_SEND = r"""
     let reasoning = "";
     let usage = null;
     let responseId = null;
+    let streamError = null;
     while (true) {
         const {done, value} = await reader.read();
         if (done) break;
@@ -97,6 +115,9 @@ _JS_SEND = r"""
                     responseId = evt["response.created"].response_id;
                     continue;
                 }
+                // 服务端会在流里下发 error 事件（HTTP 仍是 200）。漏掉它就会变成
+                // "content 为空但 ok:true"，把服务端拒绝伪装成模型没话说。
+                if (evt.error) { streamError = evt.error; continue; }
                 const delta = evt.choices && evt.choices[0] && evt.choices[0].delta;
                 if (delta) {
                     if (delta.phase === "answer") answer += delta.content || "";
@@ -111,18 +132,27 @@ _JS_SEND = r"""
         responseId,
         content: answer,
         reasoning: reasoning || null,
-        usage
+        usage,
+        streamError
     });
 })()
 """
 
 
-def new_chat(bridge: Bridge, model: str = "qwen3.7-max", project_id: str | None = None) -> str:
+def new_chat(bridge: Bridge, model: str = "qwen3.8-max-preview", project_id: str | None = None) -> str:
     """Create a new chat, return chat ID. Optionally attach to a project."""
     _ensure_origin(bridge)
-    raw = bridge.evaluate(_JS_NEW_CHAT % (json.dumps(model), json.dumps(project_id)))
+    try:
+        raw = bridge.evaluate(_JS_NEW_CHAT % (json.dumps(model), json.dumps(project_id)))
+    except BridgeTimeout as e:
+        reclassify_timeout(bridge, e)
+        raise
     data = json.loads(raw) if isinstance(raw, str) else raw
     if not data.get("success"):
+        if looks_like_punish(data.get("status"), data.get("body")):
+            raise CaptchaRequired(
+                "新建对话被云盾拦截（WAF punish）。请在浏览器窗口完成滑块后重试。"
+            )
         raise RuntimeError(f"create chat failed: {data}")
     return data["data"]["id"]
 
@@ -184,7 +214,7 @@ def send_message(
     bridge: Bridge,
     content: str,
     chat_id: str | None = None,
-    model: str = "qwen3.7-max",
+    model: str = "qwen3.8-max-preview",
     thinking: bool = False,
     search: bool = False,
     parent_id: str | None = None,
@@ -201,6 +231,17 @@ def send_message(
     from .auth import check_login
 
     _ensure_origin(bridge)
+
+    if not thinking:
+        # 有的模型禁止关思考，服务端只回一句 invalid_input，不预检的话极难定位
+        from .models import get_model_meta, thinking_is_mandatory
+        if thinking_is_mandatory(get_model_meta(bridge, model)):
+            raise ValueError(
+                f"模型 {model} 不支持关闭思考模式（think_skip.enable=false），"
+                "带 --no-thinking 会被服务端拒绝。请去掉 --no-thinking，"
+                "或换用支持关闭的模型（如 qwen3.7-max）。"
+            )
+
     if not chat_id:
         chat_id = new_chat(bridge, model=model, project_id=project_id)
 
@@ -227,10 +268,26 @@ def send_message(
         json.dumps(parent_id),
         json.dumps(file_refs, ensure_ascii=False),
     )
-    raw = bridge.evaluate(js, timeout=timeout)
+    try:
+        raw = bridge.evaluate(js, timeout=timeout)
+    except BridgeTimeout as e:
+        reclassify_timeout(bridge, e)
+        raise
     result = json.loads(raw) if isinstance(raw, str) else raw
     if result.get("error"):
+        # 被云盾拦下时返回的是 HTML punish 页而不是 SSE，报"chat failed"会误导排查方向
+        if looks_like_punish(result.get("status"), result.get("body")):
+            raise CaptchaRequired(
+                "chat.qwen.ai 对本次请求下发了人机验证（WAF punish）。"
+                "请在浏览器窗口完成滑块后重试；若频繁出现，降低调用频率。"
+            )
+        assert_no_captcha(bridge)
         raise RuntimeError(f"chat failed: {result}")
+    if result.get("streamError"):
+        err = result["streamError"]
+        raise RuntimeError(
+            f"服务端拒绝了请求: {err.get('code')} — {err.get('details') or err}"
+        )
     if uploads:
         result["uploadedFiles"] = [{"file_id": u["file_id"], "filename": u["filename"]} for u in uploads]
     return result

@@ -22,10 +22,28 @@ def _bridge(args: argparse.Namespace):
 
 # ─── subcommands ─────────────────────────────────────────────────────────────
 
+def cmd_captcha_status(args):
+    """报告云盾签名链路是否就绪、当前是否挂着滑块。"""
+    from qwen.antibot import get_state
+    from qwen.auth import _ensure_origin
+    b = _bridge(args)
+    try:
+        _ensure_origin(b)
+    except Exception:
+        pass  # 就绪失败本身就是要报告的信息，不该让本命令挂掉
+    state = get_state(b)
+    _out({"data": state}, exit_code=3 if state.get("captcha") else 0)
+
+
 def cmd_check_login(args):
     from qwen.auth import check_login
     result = check_login(_bridge(args))
     _out({"data": result}, exit_code=0 if result.get("loggedIn") else 1)
+
+
+def cmd_list_models(args):
+    from qwen.models import list_models
+    _out({"data": list_models(_bridge(args))})
 
 
 def cmd_list_conversations(args):
@@ -153,6 +171,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("check-login", help="检查登录状态").set_defaults(func=cmd_check_login)
 
+    sub.add_parser(
+        "captcha-status", help="检查云盾就绪状态 / 是否正挂着滑块验证（挂着时 exit 3）"
+    ).set_defaults(func=cmd_captcha_status)
+
+    sub.add_parser("list-models", help="列出当前账号可用模型").set_defaults(func=cmd_list_models)
+
     sp = sub.add_parser("list-conversations", help="列出历史对话")
     sp.add_argument("--page", type=int, default=1)
     sp.set_defaults(func=cmd_list_conversations)
@@ -166,7 +190,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.set_defaults(func=cmd_delete_conversation)
 
     sp = sub.add_parser("new-chat", help="新建对话，仅返回 chatId")
-    sp.add_argument("--model", default="qwen3.7-max")
+    sp.add_argument("--model", default="qwen3.8-max-preview")
     sp.add_argument("--project-id", help="挂到指定 project 下")
     sp.set_defaults(func=cmd_new_chat)
 
@@ -221,7 +245,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--content-file", help="从文件读取消息内容")
     sp.add_argument("--chat-id", help="已有对话 ID；省略则新建")
     sp.add_argument("--parent-id", help="父消息 ID（追加到已有对话时建议指定）")
-    sp.add_argument("--model", default="qwen3.7-max")
+    sp.add_argument("--model", default="qwen3.8-max-preview")
     sp.add_argument("--thinking", action=argparse.BooleanOptionalAction, default=True,
                     help="思考模式（默认开启；用 --no-thinking 关闭）")
     sp.add_argument("--search", action="store_true", help="开启联网搜索")
@@ -240,6 +264,10 @@ def main():
     try:
         args.func(args)
     except Exception as e:
+        from qwen.antibot import CaptchaRequired
+        if isinstance(e, CaptchaRequired):
+            # 独立退出码，方便调用方区分"需要人工过滑块"和普通失败——前者重试无用
+            _out({"error": {"code": "captcha_required", "message": str(e)}}, exit_code=3)
         _out({"error": {"code": "runtime_error", "message": str(e)}}, exit_code=2)
 
 

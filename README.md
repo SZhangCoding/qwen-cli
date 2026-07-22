@@ -19,7 +19,9 @@ python3 cli.py chat --content "用一句话解释什么是熵"
 
 | 命令 | 用途 |
 |------|------|
+| `captcha-status` | 检查云盾就绪状态 / 是否正挂着滑块验证 |
 | `check-login` | 检查登录状态，返回用户信息 |
+| `list-models` | 列出当前账号可用模型 |
 | `list-conversations` | 列出历史对话 |
 | `get-conversation --chat-id ID` | 获取完整消息记录 |
 | `delete-conversation --chat-id ID` | 删除对话 |
@@ -36,10 +38,34 @@ python3 cli.py chat --content "用一句话解释什么是熵"
 | `delete-project-file --project-id ID --file-id ID` | 从项目移除文件 |
 
 所有命令返回 `{"ok": true, "data": ...}` 或 `{"ok": false, "error": {...}}`。
+退出码：`0` 成功 / `1` 业务失败 / `2` 运行时错误 / `3` 需人工过滑块验证。
+
+## 滑块验证规避
+
+chat.qwen.ai 用阿里云盾（baxia + AWSC）给 `/api/v2/chat/completions`、`/api/v2/chats*`、
+`/api/v{1,2}/files/getstsToken` 等接口注入 `bx-ua` / `bx-umidtoken` 签名头。
+
+**页面冷加载后约 1.3s 内发出的请求签名是退化的**（云盾等不到 AWSC 就绪会照发占位
+token），这是滑块的主要诱因。注意 `document.readyState === "complete"` 和
+`window.baxiaInitialized === true` 都不足以判断就绪——必须等到 uid token 拿到。
+
+被拦时的请求**不会返回错误码，而是一直挂着**等人过验证，表现为"卡住直到超时"。
+
+`qwen/antibot.py` 复刻了站点自己的就绪判定并在每次调用前门控，同时检测滑块 DOM
+（`#waf_nc_block` 全屏滑块 / `.nc_wrapper` 内联滑块）并在超时后回查页面状态，
+命中即以 `captcha_required`（exit 3）快速失败。**exit 3 不要重试**，
+滑块必须人工完成；批量任务请复用同一个热 tab 并在调用间留 2–3s 间隔。
 
 ## 支持模型
 
-`qwen3.6-plus`（默认）、`qwen3-max`、`qwen3-coder`、`qwen3-next` 等。
+用 `list-models` 查当前账号实际可用的模型，不要凭记忆猜 id。
+
+默认 `qwen3.8-max-preview`；另有 `qwen3.7-max` / `qwen3.7-plus` / `qwen3.6-plus` /
+`qwen3.5-397b-a17b` / `qwen3-coder-plus` / `qwen3-vl-plus` 等。
+
+模型 meta 里的 `think_skip.enable === false` 表示**不允许关闭思考模式**（目前只有默认的
+`qwen3.8-max-preview`），此时传 `--no-thinking` 会被服务端拒为 `invalid_input`，
+CLI 会在发请求前预检拦下。需要关思考请用 `qwen3.7-max`。
 
 ## License
 
