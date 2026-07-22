@@ -56,6 +56,18 @@ token），这是滑块的主要诱因。注意 `document.readyState === "comple
 命中即以 `captcha_required`（exit 3）快速失败。**exit 3 不要重试**，
 滑块必须人工完成；批量任务请复用同一个热 tab 并在调用间留 2–3s 间隔。
 
+### 压测
+
+`tests/stress_captcha.py` 是带熔断的联网压测（检测到滑块立即中止），验证门控在负载下
+挡得住滑块：
+
+```bash
+python3 tests/stress_captcha.py            # 冷启动 + 热连打（不烧 token）
+python3 tests/stress_captcha.py --phase c  # 真实 chat 负载（消耗 token）
+```
+
+无滑块退出 0，触发则退出 1。这是对真实站点的联网测试、会占用账号会话，勿高频反复跑。
+
 ## 支持模型
 
 用 `list-models` 查当前账号实际可用的模型，不要凭记忆猜 id。
